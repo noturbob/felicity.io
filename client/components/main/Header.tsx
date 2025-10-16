@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useEffect } from "react"; // Import useState and useEffect
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useUser } from "@/context/UserContext"; // Import the useUser hook
 import {
   Home,
   HeartHandshake,
@@ -41,12 +42,19 @@ const navItems = [
 
 export function Header() {
   const pathname = usePathname();
+  const { user, isLoading } = useUser(); // Get user data from our global context
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isMounted, setIsMounted] = useState(false); // Add mounted state
+  const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
-    setIsMounted(true); // Set mounted to true only on the client
+    setIsMounted(true);
   }, []);
+  
+  // Function to handle logging out
+  const handleLogout = () => {
+      localStorage.removeItem('token'); // Clear the authentication token
+      window.location.href = '/authenticate'; // Redirect to the login page
+  };
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -76,7 +84,7 @@ export function Header() {
                     onClick={() => setIsMobileMenuOpen(false)}
                     className={cn(
                       "flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-colors hover:text-primary",
-                      isMounted && pathname === item.href && "bg-muted text-primary" // Apply fix here
+                      isMounted && pathname === item.href && "bg-muted text-primary"
                     )}
                   >
                     <item.icon className="h-5 w-5" />
@@ -101,7 +109,7 @@ export function Header() {
                 href={item.href}
                 className={cn(
                   "transition-colors hover:text-primary",
-                  isMounted && pathname === item.href && "text-primary" // And apply fix here
+                  isMounted && pathname === item.href && "text-primary"
                 )}
               >
                 {item.label}
@@ -110,23 +118,26 @@ export function Header() {
           </nav>
         </div>
 
-        {/* Right side: User Avatar & Dropdown */}
+        {/* Right side: DYNAMIC User Avatar & Dropdown */}
         <div className="ml-auto flex items-center gap-4">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="relative h-8 w-8 rounded-full">
                 <Avatar className="h-8 w-8">
-                  <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" />
-                  <AvatarFallback>B</AvatarFallback>
+                  {/* Use the user's avatar URL, or a fallback if it doesn't exist */}
+                  <AvatarImage src={user?.avatar || `https://ui-avatars.com/api/?name=${user?.name.replace(" ", "+")}&background=ec4899&color=fff`} alt={user?.name} />
+                  {/* Show the user's initial as a fallback */}
+                  <AvatarFallback>{user ? user.name.charAt(0).toUpperCase() : 'U'}</AvatarFallback>
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-56" align="end" forceMount>
               <DropdownMenuLabel className="font-normal">
                 <div className="flex flex-col space-y-1">
-                  <p className="text-sm font-medium leading-none">Bhumika</p>
+                  {/* Display the user's name and email from the context */}
+                  <p className="text-sm font-medium leading-none">{isLoading ? "Loading..." : user?.name}</p>
                   <p className="text-xs leading-none text-muted-foreground">
-                    bhumika@example.com
+                    {isLoading ? "..." : user?.email}
                   </p>
                 </div>
               </DropdownMenuLabel>
@@ -137,17 +148,15 @@ export function Header() {
                   <span>Profile</span>
                 </DropdownMenuItem>
               </Link>
-              <DropdownMenuItem>
+              <DropdownMenuItem disabled>
                 <Settings className="mr-2 h-4 w-4" />
                 <span>Settings</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-               <Link href="/authenticate">
-                  <DropdownMenuItem>
-                    <LogOut className="mr-2 h-4 w-4" />
-                    <span>Log out</span>
-                  </DropdownMenuItem>
-                </Link>
+              <DropdownMenuItem onClick={handleLogout}>
+                <LogOut className="mr-2 h-4 w-4" />
+                <span>Log out</span>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
@@ -39,23 +39,24 @@ export default function ProfilePage() {
     const [confirmPassword, setConfirmPassword] = useState("");
     const [error, setError] = useState("");
     const [isLoading, setIsLoading] = useState(true);
+    const avatarInputRef = useRef<HTMLInputElement>(null);
 
     const fetchUserProfile = async () => {
         const token = localStorage.getItem('token');
         if (!token) {
-            window.location.href = '/authenticate'; // Redirect if not logged in
+            window.location.href = '/authenticate';
             return;
         }
-
+        setIsLoading(true);
         try {
             const res = await fetch(API_URL, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
 
             if (!res.ok) {
-                localStorage.removeItem('token'); // Invalid token, log out
+                localStorage.removeItem('token');
                 window.location.href = '/authenticate';
-                throw new Error('Failed to fetch user profile.');
+                throw new Error('Session expired. Please log in again.');
             }
             const data: UserProfile = await res.json();
             setUser(data);
@@ -102,12 +103,52 @@ export default function ProfilePage() {
                 throw new Error(data.message || 'Failed to update profile.');
             }
             
-            await fetchUserProfile(); // Refresh data with latest changes
+            await fetchUserProfile();
             setIsEditing(false);
             setPassword("");
             setConfirmPassword("");
 
         } catch(err: any){
+            setError(err.message);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+    
+    const handleAvatarChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        const token = localStorage.getItem('token');
+        const formData = new FormData();
+        formData.append('avatar', file);
+
+        setIsLoading(true);
+        setError("");
+        try {
+            const res = await fetch(`${API_URL}/avatar`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: formData,
+            });
+
+            // --- FIX: Improved Error Handling ---
+            if (!res.ok) {
+                const contentType = res.headers.get("content-type");
+                if (contentType && contentType.indexOf("application/json") !== -1) {
+                    const errorData = await res.json();
+                    throw new Error(errorData.message || 'Server returned an error.');
+                } else {
+                    // This is the case you are experiencing
+                    throw new Error(`Server responded with an unexpected error (${res.status}). Check backend logs.`);
+                }
+            }
+            
+            // If response is ok, then we can safely parse JSON
+            const data = await res.json();
+            await fetchUserProfile(); // Refresh profile to show new avatar
+
+        } catch (err: any) {
             setError(err.message);
         } finally {
             setIsLoading(false);
@@ -146,7 +187,7 @@ export default function ProfilePage() {
     }
 
     if (!user) {
-        return <div className="text-center text-red-500">Could not load profile.</div>
+        return <div className="text-center text-red-500">{error || "Could not load profile."}</div>
     }
 
     return (
@@ -171,12 +212,19 @@ export default function ProfilePage() {
                 >
                     <Card className="flex flex-col items-center p-8 text-center">
                         <div className="relative mb-4">
+                            <input
+                                type="file"
+                                ref={avatarInputRef}
+                                onChange={handleAvatarChange}
+                                className="hidden"
+                                accept="image/png, image/jpeg, image/jpg"
+                            />
                             <Avatar className="w-24 h-24">
-                                <AvatarImage src={user.avatar || "https://github.com/shadcn.png"} alt={user.name} />
+                                <AvatarImage src={user.avatar || `https://ui-avatars.com/api/?name=${user.name.replace(" ", "+")}&background=ec4899&color=fff`} alt={user.name} />
                                 <AvatarFallback>{user.name.charAt(0).toUpperCase()}</AvatarFallback>
                             </Avatar>
                             {isEditing && (
-                                <Button size="icon" className="absolute bottom-0 right-0 rounded-full h-8 w-8">
+                                <Button size="icon" className="absolute bottom-0 right-0 rounded-full h-8 w-8" onClick={() => avatarInputRef.current?.click()}>
                                     <Camera className="h-4 w-4" />
                                     <span className="sr-only">Upload Picture</span>
                                 </Button>
@@ -286,3 +334,4 @@ export default function ProfilePage() {
         </div>
     );
 }
+
