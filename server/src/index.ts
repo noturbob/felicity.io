@@ -13,7 +13,7 @@ import chatRoutes from './routes/chatRoutes';
 import authRoutes from './routes/authRoutes';
 import userRoutes from './routes/userRoutes';
 import adminRoutes from './routes/adminRoutes';
-import Chat from './models/Chat'; // FIX: Corrected import path from 'Chats' to 'Chat'
+import Chat from './models/Chat';
 import User from './models/User';
 
 // Load environment variables and connect to the database
@@ -26,27 +26,53 @@ const server = http.createServer(app);
 // --- CONFIGURATION FOR CORS & DEPLOYMENT ---
 const allowedOrigins = [
   "http://localhost:3000",
-  process.env.RENDER_EXTERNAL_URL,
-  "https://felicity-io-client.vercel.app"
+  "https://felicity-io.vercel.app", // Add your exact Vercel URL
+  process.env.CLIENT_URL,
 ].filter(Boolean);
+
+console.log('Allowed Origins:', allowedOrigins); // Debug log
 
 const corsOptions = {
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Allow requests with no origin (like mobile apps, Postman, or same-origin)
+    if (!origin) {
+      return callback(null, true);
+    }
+    
+    if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      console.log(`CORS blocked origin: ${origin}`); // Debug log
+      callback(new Error(`Not allowed by CORS: ${origin}`));
     }
   },
-  methods: ["GET", "POST", "PUT", "DELETE"]
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  credentials: true, // CRITICAL: This allows cookies and authorization headers
+  allowedHeaders: ["Content-Type", "Authorization"]
 };
 
-const io = new SocketIOServer(server, { cors: corsOptions });
-
+// Apply CORS before other middleware
 app.use(cors(corsOptions));
+
+// Handle preflight requests explicitly
+app.options('*', cors(corsOptions));
+
+const io = new SocketIOServer(server, { 
+  cors: {
+    origin: allowedOrigins,
+    methods: ["GET", "POST"],
+    credentials: true
+  }
+});
+
 app.use(express.json());
 app.use(passport.initialize());
 configurePassport();
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
 // --- API ROUTES ---
 app.use('/api/auth', authRoutes);
@@ -61,15 +87,11 @@ const activeChatSessions = new Map<string, { chat: ChatSession, dbId: string }>(
 // --- WEBSOCKET AUTHENTICATION MIDDLEWARE ---
 io.use(async (socket, next) => {
     const token = socket.handshake.auth.token;
-    if (!token) {
-        return next(new Error('Authentication error: No token provided.'));
-    }
+    if (!token) { return next(new Error('Authentication error: No token provided.')); }
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { id: string };
         const user = await User.findById(decoded.id).select('-password');
-        if (!user) {
-            return next(new Error('Authentication error: User not found.'));
-        }
+        if (!user) { return next(new Error('Authentication error: User not found.')); }
         (socket as any).user = user;
         next();
     } catch (err) {
@@ -78,18 +100,16 @@ io.use(async (socket, next) => {
 });
 
 // --- HELPER FUNCTIONS ---
-const toGeminiContent = (messages: any[]): Content[] => {
-    return messages.map(msg => ({
-        role: msg.role === 'model' ? 'model' : 'user',
-        parts: [{ text: msg.content } as Part],
-    }));
-};
+const toGeminiContent = (messages: any[]): Content[] => messages.map(msg => ({ 
+  role: msg.role === 'model' ? 'model' : 'user', 
+  parts: [{ text: msg.content }] 
+}));
 
 const generateChatTitle = async (firstMessage: string) => {
     try {
         const titleModel = genAI.getGenerativeModel({ 
-            model: "gemini-1.5-flash", // Use a stable model
-            systemInstruction: "You are a chat titler. Based on the user's message, create a short, concise title (max 5 words) that summarizes the conversation topic. Only respond with the title, nothing else." 
+          model: "gemini-2.5-flash", 
+          systemInstruction: "You are a chat titler. Generate a short, concise title (3-5 words) based on the user's first message. Return only the title, no quotes or extra text." 
         });
         const result = await titleModel.generateContent(firstMessage);
         return result.response.text().trim().replace(/['".,]/g, '');
@@ -102,17 +122,17 @@ const generateChatTitle = async (firstMessage: string) => {
 const initializeChatSession = async (socketId: string, chatId: string, model: GenerativeModel) => {
     try {
         const chatRecord = await Chat.findById(chatId);
-        if (!chatRecord) {
-            console.error(`Chat ${chatId} not found in database`);
-            return false;
+        if (!chatRecord) { 
+          console.error(`Chat ${chatId} not found`); 
+          return false; 
         }
         const history = chatRecord.messages ? toGeminiContent(chatRecord.messages) : [];
         const chat = model.startChat({ 
-            history, 
-            generationConfig: { maxOutputTokens: 2000 } 
+          history, 
+          generationConfig: { maxOutputTokens: 2000 } 
         });
         activeChatSessions.set(socketId, { chat, dbId: chatId });
-        console.log(`Initialized chat session for socket ${socketId} with chat ${chatId}`);
+        console.log(`Initialized session for ${socketId} with chat ${chatId}`);
         return true;
     } catch (error) {
         console.error("Error initializing chat session:", error);
@@ -126,29 +146,24 @@ io.on('connection', (socket) => {
     console.log(`User connected: ${user.name} (${socket.id})`);
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash", // FIX: Use a stable, working model
+      model: "gemini-2.5-flash",
       systemInstruction: `You are Felicity, a kind, supportive, and brilliant AI assistant. You are speaking with ${user.name}. Your purpose is to help them with their studies, answer questions about science and life, and provide encouragement. Always be positive and insightful. Never mention that you are a language model.`,
     });
 
     socket.on('joinChat', async (chatId: string) => {
-        console.log(`Socket ${socket.id} joining chat ${chatId}`);
         const success = await initializeChatSession(socket.id, chatId, model);
-        if (!success) {
-            socket.emit('error', { message: 'Failed to join chat' });
-        }
+        if (!success) socket.emit('error', { message: 'Failed to join chat' });
     });
     
     socket.on('createNewChat', async () => {
-        console.log(`Creating new chat for user ${user.name}`);
         try {
             const newChatRecord = new Chat({ 
-                userId: user._id, 
-                title: "New Chat",
-                messages: []
+              userId: user._id, 
+              title: "New Chat", 
+              messages: [] 
             });
             await newChatRecord.save();
             const chatId = newChatRecord._id.toString();
-            console.log(`New chat created with ID: ${chatId}`);
             await initializeChatSession(socket.id, chatId, model);
             socket.emit('chatCreated', chatId);
         } catch (error) {
@@ -159,20 +174,23 @@ io.on('connection', (socket) => {
 
     socket.on('sendMessage', async (data: { message: string, chatId: string }) => {
         const { message, chatId } = data;
-        console.log(`Received message for chat ${chatId}: ${message.substring(0, 50)}...`);
         let sessionData = activeChatSessions.get(socket.id);
         
         if (!sessionData || sessionData.dbId !== chatId) {
-            console.log(`Reinitializing session for socket ${socket.id}`);
             const success = await initializeChatSession(socket.id, chatId, model);
             if (!success) {
-                return socket.emit('receiveMessage', { content: "Sorry, I couldn't connect to this chat.", chatId });
+              return socket.emit('receiveMessage', { 
+                content: "Sorry, I couldn't connect to this chat.", 
+                chatId 
+              });
             }
             sessionData = activeChatSessions.get(socket.id)!;
         }
 
         try {
-            await Chat.findByIdAndUpdate(chatId, { $push: { messages: { role: 'user', content: message } } });
+            await Chat.findByIdAndUpdate(chatId, { 
+              $push: { messages: { role: 'user', content: message } } 
+            });
             
             const chatRecord = await Chat.findById(chatId);
             if (chatRecord && chatRecord.messages.length === 1) {
@@ -181,17 +199,18 @@ io.on('connection', (socket) => {
                 socket.emit('titleUpdated', { chatId, newTitle });
             }
 
-            console.log(`Sending message to Gemini...`);
             const result = await sessionData.chat.sendMessage(message); 
             const aiText = result.response.text();
-            console.log(`Received response from Gemini: ${aiText.substring(0, 50)}...`);
-            
-            await Chat.findByIdAndUpdate(chatId, { $push: { messages: { role: 'model', content: aiText } } });
-            
+            await Chat.findByIdAndUpdate(chatId, { 
+              $push: { messages: { role: 'model', content: aiText } } 
+            });
             socket.emit('receiveMessage', { content: aiText, chatId });
         } catch (error) {
             console.error("Error in sendMessage:", error);
-            socket.emit('receiveMessage', { content: "Sorry, an error occurred. Please try again.", chatId });
+            socket.emit('receiveMessage', { 
+              content: "Sorry, an error occurred. Please try again.", 
+              chatId 
+            });
         }
     });
 
@@ -201,8 +220,18 @@ io.on('connection', (socket) => {
     });
 });
 
+// Error handling middleware
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('Error:', err);
+  res.status(500).json({ 
+    error: 'Internal server error', 
+    message: err.message 
+  });
+});
+
 // --- SERVER STARTUP ---
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`Server is listening on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
