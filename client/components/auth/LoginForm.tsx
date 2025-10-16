@@ -32,7 +32,7 @@ export function LoginForm({ setAuthView, className, ...props }: LoginFormProps) 
     const loginEmail = role === 'admin' ? ADMIN_EMAIL : email;
 
     try {
-      const res = await fetch(`${API_URL}/login`, {
+      const res = await fetch(`${API_URL}api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // FIX: Removed the 'role' property from the request body.

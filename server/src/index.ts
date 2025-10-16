@@ -26,7 +26,7 @@ const server = http.createServer(app);
 // --- CONFIGURATION FOR CORS & DEPLOYMENT ---
 const allowedOrigins = [
   "http://localhost:3000",
-  "https://felicity-io.vercel.app", // Add your exact Vercel URL
+  "https://felicity-io.vercel.app",
   process.env.CLIENT_URL,
 ].filter(Boolean);
 
@@ -39,6 +39,11 @@ const corsOptions = {
       return callback(null, true);
     }
     
+    // Allow all Vercel preview deployments (they have this pattern)
+    if (origin.includes('vercel.app')) {
+      return callback(null, true);
+    }
+    
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -47,8 +52,10 @@ const corsOptions = {
     }
   },
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  credentials: true, // CRITICAL: This allows cookies and authorization headers
-  allowedHeaders: ["Content-Type", "Authorization"]
+  credentials: true,
+  allowedHeaders: ["Content-Type", "Authorization"],
+  exposedHeaders: ["Content-Length", "X-Request-Id"],
+  maxAge: 86400 // 24 hours - cache preflight requests
 };
 
 // Apply CORS before other middleware
@@ -59,7 +66,16 @@ app.options('*', cors(corsOptions));
 
 const io = new SocketIOServer(server, { 
   cors: {
-    origin: allowedOrigins,
+    origin: (origin: string | undefined, callback: (err: Error | null, success?: boolean) => void) => {
+      if (!origin) {
+        return callback(null, true);
+      }
+      if (origin.includes('vercel.app') || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ["GET", "POST"],
     credentials: true
   }
