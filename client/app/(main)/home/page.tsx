@@ -3,14 +3,24 @@
 import { useUser } from "@/context/UserContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Carousel, CarouselContent, CarouselItem } from "@/components/ui/carousel";
+// FIX: This package needs to be installed. Run the following command in your /client terminal:
+// npm install embla-carousel-autoplay
+import Autoplay from "embla-carousel-autoplay";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Plus, Send, HeartHandshake } from "lucide-react";
+import { Plus, Send, Smile, Frown, PartyPopper, BrainCircuit, Cake, Video, Heart } from "lucide-react";
 import { motion } from "framer-motion";
-import Link from "next/link";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useState } from "react";
-import { Smile, Frown, PartyPopper, BrainCircuit } from "lucide-react";
+import { useState, useRef } from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // Data for the mood selector dropdown
 const moodOptions = [
@@ -20,34 +30,22 @@ const moodOptions = [
     { value: "excited", icon: <PartyPopper className="h-5 w-5 text-yellow-500" />, label: "Excited" },
 ];
 
-// --- FIX: Create specific types for carousel items ---
-interface LinkCarouselItem {
-    type: 'link';
-    href: string; // Guaranteed to be a string
-    icon: React.ReactNode;
-    title: string;
-}
+// Define the type for the dialog keys to ensure type safety
+type DialogKey = 'birthday' | 'video' | 'love';
 
-interface StandardCarouselItem {
-    type: 'item';
-    title: string;
-    href?: undefined; // Explicitly not present or undefined
-}
-
-// A union type that represents either a link or a standard item
-type CarouselItemData = LinkCarouselItem | StandardCarouselItem;
-
-
-// Data for the carousel, now using the specific types
-const carouselItems: CarouselItemData[] = [
-    { type: 'link', href: '/support', icon: <HeartHandshake className="h-10 w-10 text-pink-500"/>, title: "Support" },
-    { type: 'item', title: "Item 2" },
-    { type: 'item', title: "Item 3" },
+// Data for the carousel items
+const carouselItems: { key: DialogKey; icon: React.ReactNode; title: string }[] = [
+    { key: 'birthday', icon: <Cake className="h-10 w-10 text-pink-500"/>, title: "A Message" },
+    { key: 'video', icon: <Video className="h-10 w-10 text-pink-500"/>, title: "A Moment" },
+    { key: 'love', icon: <Heart className="h-10 w-10 text-pink-500"/>, title: "A Reminder" },
 ];
 
 export default function HomePage() {
     const { user, isLoading } = useUser();
     const [selectedMood, setSelectedMood] = useState<string | undefined>(undefined);
+    const [dialogKey, setDialogKey] = useState<DialogKey | null>(null);
+    
+    const autoplayPlugin = useRef(Autoplay({ delay: 4000, stopOnInteraction: true }));
 
     const getGreeting = () => {
         const hour = new Date().getHours();
@@ -67,94 +65,137 @@ export default function HomePage() {
     };
 
     return (
-        <div className="flex flex-col gap-8 sm:gap-12">
-            <motion.div
-                className="text-center"
-                initial="hidden" animate="visible" transition={{ duration: 0.5 }} variants={FADE_IN_VARIANTS}
-            >
-                <h1 className="text-4xl sm:text-5xl md:text-7xl font-bold tracking-tight text-gray-800 dark:text-gray-200">
-                    {getGreeting()},
-                </h1>
-                <span className="text-5xl sm:text-6xl md:text-8xl font-extrabold tracking-tighter bg-gradient-to-r from-pink-500 to-rose-500 bg-clip-text text-transparent">
-                    {isLoading ? "..." : `${user?.name.split(" ")[0]}!`}
-                </span>
-                <motion.p
-                  className="mt-4 text-sm text-muted-foreground sm:text-base italic"
-                  initial="hidden" animate="visible" transition={{ duration: 0.5, delay: 0.1 }} variants={FADE_IN_VARIANTS}
+        <>
+            <div className="flex flex-col gap-10 sm:gap-16">
+                {/* Centered Gradient Greeting */}
+                <motion.div
+                    className="text-center"
+                    initial="hidden" animate="visible" transition={{ duration: 0.5 }} variants={FADE_IN_VARIANTS}
                 >
-                  "The secret of getting ahead is getting started."
-                </motion.p>
-            </motion.div>
+                    <h1 className="text-4xl sm:text-5xl md:text-7xl font-bold tracking-tight text-gray-800 dark:text-gray-200">
+                        {getGreeting()},
+                    </h1>
+                    <span className="text-5xl sm:text-6xl md:text-8xl font-extrabold tracking-tighter bg-gradient-to-r from-pink-500 to-rose-500 bg-clip-text text-transparent">
+                        {isLoading ? "..." : `${user?.name.split(" ")[0]}!`}
+                    </span>
+                    <motion.p
+                        className="mt-4 text-sm sm:text-base text-muted-foreground italic max-w-md mx-auto"
+                        initial="hidden" animate="visible" transition={{ duration: 0.5, delay: 0.1 }} variants={FADE_IN_VARIANTS}
+                    >
+                        "The secret of getting ahead is getting started."
+                    </motion.p>
+                </motion.div>
 
-            {/* Carousel Section */}
-            <motion.div
-                className="w-full flex justify-center mt-4"
-                initial="hidden" animate="visible" transition={{ duration: 0.5, delay: 0.2 }} variants={FADE_IN_VARIANTS}
-            >
-                <Carousel className="w-full max-w-[280px] sm:max-w-xs md:max-w-sm lg:max-w-md">
-                    <CarouselContent>
-                        {carouselItems.map((item, index) => (
-                            <CarouselItem key={index} className="md:basis-1/3">
-                                <div className="p-1">
-                                    {/* This 'if' check now acts as a type guard */}
-                                    {item.type === 'link' ? (
-                                        // TypeScript now knows item.href is a string here, fixing the error.
-                                        <Link href={item.href}>
-                                            <Card className="hover:bg-pink-50 transition-colors">
-                                                <CardContent className="flex flex-col gap-2 aspect-square items-center justify-center p-6 bg-pink-50/50 dark:bg-pink-950/20 rounded-lg">
-                                                    {item.icon}
-                                                    <span className="text-sm font-semibold text-pink-600 dark:text-pink-400">{item.title}</span>
-                                                </CardContent>
-                                            </Card>
-                                        </Link>
-                                    ) : (
-                                        <Card>
-                                            <CardContent className="flex aspect-square items-center justify-center p-6 bg-pink-50 dark:bg-pink-950/20 rounded-lg">
-                                                <span className="text-3xl font-semibold text-pink-600 dark:text-pink-400">{index + 1}</span>
+                {/* Carousel Section with Triggers */}
+                <motion.div
+                    className="w-full flex justify-center"
+                    initial="hidden" animate="visible" transition={{ duration: 0.5, delay: 0.2 }} variants={FADE_IN_VARIANTS}
+                >
+                    <Carousel 
+                        className="w-full max-w-xs sm:max-w-sm md:max-w-md lg:max-w-lg"
+                        plugins={[autoplayPlugin.current]}
+                        onMouseEnter={autoplayPlugin.current.stop}
+                        onMouseLeave={autoplayPlugin.current.reset}
+                        opts={{ loop: true }}
+                    >
+                        <CarouselContent>
+                            {carouselItems.map((item) => (
+                                <CarouselItem key={item.key} className="basis-1/2 sm:basis-1/3">
+                                    <div className="p-1">
+                                        <Card 
+                                            className="bg-pink-50/50 dark:bg-pink-950/20 transition-all hover:brightness-95 cursor-pointer rounded-lg"
+                                            onClick={() => setDialogKey(item.key)}
+                                        >
+                                            <CardContent className="flex flex-col gap-2 aspect-square items-center justify-center p-4">
+                                                {item.icon}
+                                                <span className="text-sm font-semibold text-pink-600 dark:text-pink-400">{item.title}</span>
                                             </CardContent>
                                         </Card>
-                                    )}
-                                </div>
-                            </CarouselItem>
-                        ))}
-                    </CarouselContent>
-                </Carousel>
-            </motion.div>
-            
-            {/* Glassmorphism Textarea Section */}
-             <motion.div
-                className="mt-8"
-                initial="hidden" animate="visible" transition={{ duration: 0.5, delay: 0.4 }} variants={FADE_IN_VARIANTS}
-            >
-                <div className="relative w-full max-w-4xl mx-auto">
-                    <Select onValueChange={setSelectedMood} value={selectedMood}>
-                        <SelectTrigger className="absolute top-1/2 -translate-y-1/2 left-2 sm:left-3 h-9 w-9 rounded-full bg-transparent border-0 z-10 p-0 flex items-center justify-center text-pink-300 hover:text-pink-100">
-                             <SelectValue>
-                                {renderSelectedMoodIcon()}
-                             </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent className="[&_[data-radix-select-item-indicator]]:hidden">
-                             {moodOptions.map((mood) => (
-                                <SelectItem key={mood.value} value={mood.value} className="justify-center">
-                                    <div className="flex items-center gap-2">
-                                        {mood.icon}
-                                        <span>{mood.label}</span>
                                     </div>
-                                </SelectItem>
-                             ))}
-                        </SelectContent>
-                    </Select>
-                    <Textarea
-                        placeholder="Please let me hear your thoughts..."
-                        className="flex min-h-[50px] w-full resize-none rounded-full border border-pink-500/20 bg-pink-500/10 px-14 py-2 text-center text-base backdrop-blur-sm placeholder:text-pink-500/70 placeholder:text-sm sm:placeholder:text-base focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pink-100 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50 sm:px-16"
-                        rows={1}
-                    />
-                    <Button size="icon" className="absolute top-1/2 -translate-y-1/2 right-2 sm:right-3 h-9 w-9 rounded-full shadow-lg shadow-pink-500/20 hover:shadow-xl hover:shadow-pink-500/30 transition-shadow z-10">
-                        <Send className="h-4 w-4" />
-                        <span className="sr-only">Send</span>
-                    </Button>
-                </div>
-            </motion.div>
-        </div>
+                                </CarouselItem>
+                            ))}
+                        </CarouselContent>
+                    </Carousel>
+                </motion.div>
+                
+                {/* Glassmorphism Textarea Section */}
+                <motion.div
+                    className="mt-4"
+                    initial="hidden" animate="visible" transition={{ duration: 0.5, delay: 0.4 }} variants={FADE_IN_VARIANTS}
+                >
+                    <div className="relative w-full max-w-3xl mx-auto">
+                        <Select onValueChange={setSelectedMood} value={selectedMood}>
+                            <SelectTrigger className="absolute top-1/2 -translate-y-1/2 left-2 sm:left-3 h-9 w-9 rounded-full bg-transparent border-0 z-10 p-0 flex items-center justify-center text-pink-300 hover:text-pink-100">
+                                <SelectValue>{renderSelectedMoodIcon()}</SelectValue>
+                            </SelectTrigger>
+                            <SelectContent className="[&_[data-radix-select-item-indicator]]:hidden">
+                                {moodOptions.map((mood) => (
+                                    <SelectItem key={mood.value} value={mood.value} className="justify-center">
+                                        <div className="flex items-center gap-2">{mood.icon}<span>{mood.label}</span></div>
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <Textarea
+                            placeholder="Please let me hear your thoughts..."
+                            className="flex items-center justify-center min-h-[43px] w-full resize-none rounded-full border border-pink-500/20 bg-pink-500/10 px-14 py-2 text-center text-base backdrop-blur-sm placeholder:text-pink-500/70 placeholder:text-sm sm:placeholder:text-base focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-pink-100 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-50 sm:px-16"
+                            rows={1}
+                        />
+                        <Button size="icon" className="absolute top-1/2 -translate-y-1/2 right-2 sm:right-3 h-9 w-9 rounded-full shadow-lg shadow-pink-500/20 hover:shadow-xl hover:shadow-pink-500/30 transition-shadow z-10">
+                            <Send className="h-4 w-4" />
+                            <span className="sr-only">Send</span>
+                        </Button>
+                    </div>
+                </motion.div>
+            </div>
+
+            {/* A SINGLE DIALOG TO RULE THEM ALL */}
+            <AlertDialog open={dialogKey !== null} onOpenChange={(open) => !open && setDialogKey(null)}>
+                <AlertDialogContent>
+                    {dialogKey === 'birthday' && (
+                        <>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>Happy Birthday, My Love!</AlertDialogTitle>
+                                <AlertDialogDescription>A special message, just for you.</AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <p className="py-4 text-center text-lg">"Happy Birthday Bhumika! I hope you have a day as amazing as you are. I love you more than words can say."</p>
+                        </>
+                    )}
+                    {dialogKey === 'video' && (
+                        <>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>A Special Moment</AlertDialogTitle>
+                            </AlertDialogHeader>
+                            <div className="aspect-video overflow-hidden rounded-md mt-4">
+                                <iframe
+                                    className="w-full h-full"
+                                    src="https://www.youtube.com/embed/jfKfPfyJRdk" // lofi girl video
+                                    title="YouTube video player"
+                                    frameBorder="0"
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                    allowFullScreen
+                                ></iframe>
+                            </div>
+                        </>
+                    )}
+                    {dialogKey === 'love' && (
+                        <>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle className="text-center">Just a Quick Reminder...</AlertDialogTitle>
+                            </AlertDialogHeader>
+                            <div className="flex items-center justify-center py-12">
+                                <h2 className="text-6xl font-extrabold tracking-tight bg-gradient-to-r from-pink-500 to-rose-500 bg-clip-text text-transparent">
+                                    I LOVE YOU!
+                                </h2>
+                            </div>
+                        </>
+                    )}
+                    <AlertDialogFooter>
+                        <AlertDialogAction>Close</AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+        </>
     );
 }
+
