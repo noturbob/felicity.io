@@ -28,7 +28,7 @@ interface User {
   avatar?: string;
 }
 
-// Dynamic URLs: local for dev, production from environment variables
+// Dynamic URLs: fallback to localhost for dev
 const SERVER_URL =
   process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:8080";
 const API_URL =
@@ -119,7 +119,7 @@ export default function PersonalAIPage(): React.ReactElement {
     };
 
     socket.on("connect", onConnect);
-    socket.on("receiveMessage", (data: { content: string; chatId: string; }) => {
+    socket.on("receiveMessage", (data: { content: string; chatId: string }) => {
       if (data.chatId === currentChatId) {
         setCurrentMessages(prev => [...prev, { role: "model", content: data.content }]);
       }
