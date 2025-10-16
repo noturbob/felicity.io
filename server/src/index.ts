@@ -4,6 +4,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import passport from 'passport';
+import jwt from 'jsonwebtoken';
 import { GoogleGenerativeAI, ChatSession, GenerativeModel, Content, Part } from '@google/generative-ai';
 import { configurePassport } from './config/passport';
 import connectDB from './config/db';
@@ -11,12 +12,12 @@ import grievanceRoutes from './routes/grievanceRoutes';
 import chatRoutes from './routes/chatRoutes';
 import authRoutes from './routes/authRoutes';
 import userRoutes from './routes/userRoutes';
-import Chat from './models/Chats';
+import adminRoutes from './routes/adminRoutes';
+import Chat from './models/Chat';
+import User from './models/User';
 
-// Load environment variables at the very beginning
+// Load environment variables and connect to the database
 dotenv.config();
-
-// Connect to Database
 connectDB();
 
 const app = express();
@@ -37,15 +38,13 @@ const corsOptions = {
       callback(new Error('Not allowed by CORS'));
     }
   },
-  methods: ["GET", "POST", "PUT", "DELETE"] // Allow all necessary HTTP methods
+  methods: ["GET", "POST", "PUT", "DELETE"]
 };
 
 const io = new SocketIOServer(server, { cors: corsOptions });
 
 app.use(cors(corsOptions));
 app.use(express.json());
-
-// --- PASSPORT & AUTH MIDDLEWARE ---
 app.use(passport.initialize());
 configurePassport();
 
@@ -54,11 +53,30 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/grievances', grievanceRoutes);
 app.use('/api/chats', chatRoutes);
+app.use('/api/admin', adminRoutes);
 
 // --- GEMINI & WEBSOCKET SETUP ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 const activeChatSessions = new Map<string, { chat: ChatSession, dbId: string }>();
-const BHUMIKA_USER_ID = "bhumika_unique_felicity_user"; // Placeholder
+
+// --- WEBSOCKET AUTHENTICATION MIDDLEWARE ---
+io.use(async (socket, next) => {
+    const token = socket.handshake.auth.token;
+    if (!token) {
+        return next(new Error('Authentication error: No token provided.'));
+    }
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { id: string };
+        const user = await User.findById(decoded.id).select('-password');
+        if (!user) {
+            return next(new Error('Authentication error: User not found.'));
+        }
+        (socket as any).user = user;
+        next();
+    } catch (err) {
+        return next(new Error('Authentication error: Invalid token.'));
+    }
+});
 
 // --- HELPER FUNCTIONS ---
 const toGeminiContent = (messages: any[]): Content[] => {
@@ -70,63 +88,108 @@ const toGeminiContent = (messages: any[]): Content[] => {
 
 const generateChatTitle = async (firstMessage: string) => {
     try {
-        const titleModel = genAI.getGenerativeModel({
-            model: "gemini-1.5-flash",
-            systemInstruction: "You are a chat titler. Based on the user's message, create a short, concise title (max 5 words) that summarizes the conversation topic. Only respond with the title, nothing else.",
+        const titleModel = genAI.getGenerativeModel({ 
+            model: "gemini-1.5-flash", 
+            systemInstruction: "You are a chat titler. Based on the user's message, create a short, concise title (max 5 words) that summarizes the conversation topic. Only respond with the title, nothing else." 
         });
         const result = await titleModel.generateContent(firstMessage);
         return result.response.text().trim().replace(/['".,]/g, '');
     } catch (error) {
         console.error("Error generating chat title:", error);
-        return "Chat Topic";
+        return "New Chat";
     }
 };
 
 const initializeChatSession = async (socketId: string, chatId: string, model: GenerativeModel) => {
-    const chatRecord = await Chat.findById(chatId);
-    const history = chatRecord ? toGeminiContent(chatRecord.messages || []) : [];
-    const chat = model.startChat({ history, generationConfig: { maxOutputTokens: 1000 } });
-    activeChatSessions.set(socketId, { chat, dbId: chatId });
-    return chat;
+    try {
+        const chatRecord = await Chat.findById(chatId);
+        if (!chatRecord) {
+            console.error(`Chat ${chatId} not found in database`);
+            return false;
+        }
+        const history = chatRecord.messages ? toGeminiContent(chatRecord.messages) : [];
+        const chat = model.startChat({ 
+            history, 
+            generationConfig: { maxOutputTokens: 2000 } 
+        });
+        activeChatSessions.set(socketId, { chat, dbId: chatId });
+        console.log(`Initialized chat session for socket ${socketId} with chat ${chatId}`);
+        return true;
+    } catch (error) {
+        console.error("Error initializing chat session:", error);
+        return false;
+    }
 };
 
 // --- WEBSOCKET CONNECTION LOGIC ---
 io.on('connection', (socket) => {
-    console.log('A user connected:', socket.id);
+    const user = (socket as any).user;
+    console.log(`User connected: ${user.name} (${socket.id})`);
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      systemInstruction: "You are Felicity, a kind, supportive, and brilliant AI assistant created for a biotech student named Bhumika...",
+      model: "gemini-2.0-flash-exp",
+      systemInstruction: `You are Felicity, a kind, supportive, and brilliant AI assistant. You are speaking with ${user.name}. Your purpose is to help them with their studies, answer questions about science and life, and provide encouragement. Always be positive and insightful. Never mention that you are a language model.`,
     });
 
-    socket.on('joinChat', (chatId: string) => {
-        initializeChatSession(socket.id, chatId, model).catch(err => console.error("Failed to join chat session:", err));
+    socket.on('joinChat', async (chatId: string) => {
+        console.log(`Socket ${socket.id} joining chat ${chatId}`);
+        const success = await initializeChatSession(socket.id, chatId, model);
+        if (!success) {
+            socket.emit('error', { message: 'Failed to join chat' });
+        }
     });
     
     socket.on('createNewChat', async () => {
+        console.log(`Creating new chat for user ${user.name}`);
         try {
-            const newChatRecord = new Chat({ userId: BHUMIKA_USER_ID, title: "New Chat Session" });
+            const newChatRecord = new Chat({ 
+                userId: user._id, 
+                title: "New Chat",
+                messages: []
+            });
             await newChatRecord.save();
-            socket.emit('chatCreated', newChatRecord._id.toString());
-            await initializeChatSession(socket.id, newChatRecord._id.toString(), model);
+            const chatId = newChatRecord._id.toString();
+            console.log(`New chat created with ID: ${chatId}`);
+            
+            // Initialize the session immediately
+            await initializeChatSession(socket.id, chatId, model);
+            
+            // Emit the chatCreated event
+            socket.emit('chatCreated', chatId);
         } catch (error) {
             console.error("Failed to create new chat:", error);
-            socket.emit('chatCreationError', 'Could not create a new chat session.');
+            socket.emit('error', { message: 'Failed to create new chat' });
         }
     });
 
     socket.on('sendMessage', async (data: { message: string, chatId: string }) => {
         const { message, chatId } = data;
+        console.log(`Received message for chat ${chatId}: ${message.substring(0, 50)}...`);
+        
         let sessionData = activeChatSessions.get(socket.id);
-
+        
+        // If session doesn't exist or is for a different chat, initialize it
         if (!sessionData || sessionData.dbId !== chatId) {
-            await initializeChatSession(socket.id, chatId, model);
-            sessionData = activeChatSessions.get(socket.id)!; 
+            console.log(`Reinitializing session for socket ${socket.id}`);
+            const success = await initializeChatSession(socket.id, chatId, model);
+            if (!success) {
+                socket.emit('receiveMessage', { 
+                    content: "Sorry, I couldn't connect to this chat. Please try again.", 
+                    chatId 
+                });
+                return;
+            }
+            sessionData = activeChatSessions.get(socket.id)!;
         }
 
         try {
-            await Chat.findByIdAndUpdate(chatId, { $push: { messages: { role: 'user', content: message } } });
+            // Save user message to database
+            await Chat.findByIdAndUpdate(chatId, { 
+                $push: { messages: { role: 'user', content: message } },
+                $set: { lastMessageTime: new Date() }
+            });
             
+            // Check if this is the first message and generate title
             const chatRecord = await Chat.findById(chatId);
             if (chatRecord && chatRecord.messages.length === 1) {
                 const newTitle = await generateChatTitle(message);
@@ -134,21 +197,32 @@ io.on('connection', (socket) => {
                 socket.emit('titleUpdated', { chatId, newTitle });
             }
 
+            // Send message to Gemini and get response
+            console.log(`Sending message to Gemini...`);
             const result = await sessionData.chat.sendMessage(message); 
             const aiText = result.response.text();
-
-            await Chat.findByIdAndUpdate(chatId, { $push: { messages: { role: 'model', content: aiText } } });
-
+            console.log(`Received response from Gemini: ${aiText.substring(0, 50)}...`);
+            
+            // Save AI response to database
+            await Chat.findByIdAndUpdate(chatId, { 
+                $push: { messages: { role: 'model', content: aiText } },
+                $set: { lastMessageTime: new Date() }
+            });
+            
+            // Send response back to client
             socket.emit('receiveMessage', { content: aiText, chatId });
         } catch (error) {
-            console.error("Error calling Gemini API or saving to DB:", error);
-            socket.emit('receiveMessage', { content: "Sorry, an error occurred with the AI.", chatId });
+            console.error("Error in sendMessage:", error);
+            socket.emit('receiveMessage', { 
+                content: "Sorry, an error occurred. Please try again.", 
+                chatId 
+            });
         }
     });
 
     socket.on('disconnect', () => {
         activeChatSessions.delete(socket.id);
-        console.log('User disconnected:', socket.id);
+        console.log(`User disconnected: ${user.name} (${socket.id})`);
     });
 });
 

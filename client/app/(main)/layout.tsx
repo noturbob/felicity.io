@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams, usePathname, useRouter } from 'next/navigation';
 import { Header } from "@/components/main/Header";
 import { WelcomeStepper } from "@/components/main/WelcomeStepper";
-import { UserProvider } from '@/context/UserContext'; // Import the UserProvider to make user data available
+import { UserProvider } from '@/context/UserContext';
 
 export default function MainLayout({
   children,
@@ -14,27 +14,46 @@ export default function MainLayout({
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null); // Use null for initial loading state
 
   useEffect(() => {
-    // This effect handles the redirect back from Google OAuth.
-    // It checks the URL for a 'token' query parameter.
-    const token = searchParams.get('token');
-    if (token) {
-      // 1. If a token is found, it's saved to the browser's localStorage.
-      // This token will be used for all future secure API requests.
+    // This effect handles both the redirect from Google OAuth and route protection.
+    const urlToken = searchParams.get('token');
+    
+    if (urlToken) {
+      // Case 1: A token is found in the URL after Google login.
+      // We save it to localStorage for future use.
       console.log("Found token in URL, saving to localStorage...");
-      localStorage.setItem('token', token);
+      localStorage.setItem('token', urlToken);
 
-      // 2. The URL is then cleaned by removing the token parameter.
-      // This is important for security and provides a cleaner user experience.
+      // We also mark the user as authenticated immediately.
+      setIsAuthenticated(true);
+
+      // Clean the URL by removing the token parameter for security.
       const newUrl = pathname; 
       router.replace(newUrl);
+    } else {
+      // Case 2: This is a normal page load. Check for an existing token.
+      const storedToken = localStorage.getItem('token');
+      if (!storedToken) {
+        // No token found, user is not authenticated. Redirect to login page.
+        console.log("No token found, redirecting to login.");
+        router.push('/authenticate');
+      } else {
+        // A token exists, so the user is allowed to see the page.
+        setIsAuthenticated(true);
+      }
     }
-  }, [searchParams, pathname, router]); // This effect runs whenever the URL changes.
+  }, [searchParams, pathname, router]);
 
-  return (
-    // The UserProvider wraps the entire logged-in section of the app.
-    // This makes the user's name, email, and avatar available to all child components.
+  // While checking for authentication, we can show a loading state
+  // to prevent a "flash" of the page content for unauthenticated users.
+  if (isAuthenticated === null) {
+    return <div className="flex h-screen w-full items-center justify-center">Loading...</div>;
+  }
+
+  // Only render the main app content if the user is authenticated.
+  return isAuthenticated ? (
     <UserProvider>
       <div className="flex min-h-screen flex-col bg-gray-50 dark:bg-gray-900">
         <WelcomeStepper />
@@ -44,6 +63,6 @@ export default function MainLayout({
         </main>
       </div>
     </UserProvider>
-  );
+  ) : null; // Render nothing while redirecting
 }
 

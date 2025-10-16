@@ -16,11 +16,16 @@ interface Message {
   role: "user" | "model";
   content: string;
 }
-
 interface ChatSessionInfo {
   id: string;
   title: string;
   lastMessageTime: string;
+}
+interface User {
+  _id: string;
+  name: string;
+  email: string;
+  avatar?: string;
 }
 
 const SERVER_URL = "http://localhost:8080";
@@ -31,17 +36,22 @@ export default function PersonalAIPage(): React.ReactElement {
   const [chatHistory, setChatHistory] = useState<ChatSessionInfo[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [input, setInput] = useState<string>("");
-  const [isLoading, setIsLoading] = useState<boolean>(true); // Start with loading true
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isCreatingChat, setIsCreatingChat] = useState<boolean>(false);
+  const [user, setUser] = useState<User | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const socketRef = useRef<Socket | null>(null);
+  const pendingMessageRef = useRef<string | null>(null);
 
-  // --- API/Data Fetching ---
   const loadChatMessages = useCallback(async (chatId: string) => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
     setIsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/${chatId}`);
+      const res = await fetch(`${API_URL}/${chatId}`, { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!res.ok) throw new Error("Failed to fetch messages");
       const messages: Message[] = await res.json();
       setCurrentMessages(messages);
       setCurrentChatId(chatId);
@@ -53,94 +63,165 @@ export default function PersonalAIPage(): React.ReactElement {
     }
   }, []);
 
-  const fetchChatList = useCallback(async (loadLatest = false) => {
+  const fetchChatList = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
     try {
-      const res = await fetch(API_URL);
+      const res = await fetch(API_URL, { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!res.ok) throw new Error("Failed to fetch chat list");
       const data: ChatSessionInfo[] = await res.json();
       setChatHistory(data);
-
-      if (data.length > 0 && loadLatest) {
-        await loadChatMessages(data[0].id);
-      } else if (data.length === 0) {
-        setCurrentChatId(null);
-        setCurrentMessages([]);
-        setIsLoading(false);
-      }
+      return data;
     } catch (error) {
       console.error("Failed to fetch chat list:", error);
+      return [];
     }
-  }, [loadChatMessages]);
+  }, []);
 
-  // --- FIX: This is the simplified, correct function ---
-  const handleCreateNewChat = () => {
-    if (!socketRef.current || !socketRef.current.connected) {
-      console.error("Socket not connected. Cannot create new chat.");
-      return;
+  const fetchUserProfile = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+      const res = await fetch(`${SERVER_URL}/api/users/profile`, { 
+        headers: { 'Authorization': `Bearer ${token}` } 
+      });
+      if (!res.ok) throw new Error("Failed to fetch user profile");
+      const userData: User = await res.json();
+      setUser(userData);
+      console.log("User profile loaded:", userData);
+    } catch (error) {
+      console.error("Failed to fetch user profile:", error);
     }
-    setIsLoading(true);
+  }, []);
+
+  const handleCreateNewChat = useCallback(() => {
+    if (!socketRef.current || !socketRef.current.connected) {
+        console.error("Socket not connected. Cannot create new chat.");
+        return;
+    }
+    setIsCreatingChat(true);
     setCurrentMessages([]);
     setCurrentChatId(null);
-    // Just emit the event. The 'chatCreated' listener will handle the rest.
+    setIsLoading(true);
     socketRef.current.emit("createNewChat");
-  };
+  }, []);
 
   // --- WebSocket Connection ---
   useEffect(() => {
-    const socket = io(SERVER_URL);
+    const token = localStorage.getItem('token');
+    if (!token) {
+      window.location.href = '/authenticate';
+      return;
+    }
+
+    const socket = io(SERVER_URL, { auth: { token } });
     socketRef.current = socket;
 
-    socket.on("connect", () => {
+    const onConnect = async () => {
       console.log("Socket connected, fetching initial data.");
-      fetchChatList(true); // Fetch list and load the latest chat on connect
-    });
+      await fetchUserProfile(); // Fetch user profile first
+      const chats = await fetchChatList();
+      if (chats && chats.length > 0) {
+        await loadChatMessages(chats[0].id);
+      } else {
+        setIsLoading(false);
+      }
+    };
 
-    socket.on("receiveMessage", (data: { content: string; chatId: string }) => {
-      // Use function form of setState to access the most recent currentChatId
-      setCurrentChatId((prevChatId) => {
-        if (data.chatId === prevChatId) {
-          setCurrentMessages((prev) => [...prev, { role: "model", content: data.content }]);
-        }
-        return prevChatId;
-      });
+    const onReceiveMessage = (data: { content: string; chatId: string }) => {
+      if (data.chatId === currentChatId) {
+        setCurrentMessages((prev) => [...prev, { role: "model", content: data.content }]);
+      }
       setIsLoading(false);
       fetchChatList();
-    });
+    };
 
-    // --- FIX: This listener correctly handles the response from the server ---
-    socket.on("chatCreated", (newChatId: string) => {
+    const onChatCreated = async (newChatId: string) => {
       console.log("Server confirmed chat created:", newChatId);
       setCurrentChatId(newChatId);
       setCurrentMessages([]);
+      setIsCreatingChat(false);
       setIsLoading(false);
       socket.emit("joinChat", newChatId);
-      fetchChatList(); // Refresh the sidebar
-    });
+      await fetchChatList();
+      
+      // Send pending message if exists
+      if (pendingMessageRef.current) {
+        const messageToSend = pendingMessageRef.current;
+        pendingMessageRef.current = null;
+        const userMessage: Message = { role: "user", content: messageToSend };
+        setCurrentMessages([userMessage]);
+        socket.emit("sendMessage", { message: messageToSend, chatId: newChatId });
+        setIsLoading(true);
+      }
+    };
 
-    socket.on("titleUpdated", (data: { chatId: string; newTitle: string }) => {
+    const onTitleUpdated = (data: { chatId: string; newTitle: string }) => {
       setChatHistory((prev) =>
         prev.map((chat) => (chat.id === data.chatId ? { ...chat, title: data.newTitle } : chat))
       );
-    });
+    };
+
+    const onDisconnect = () => console.log("Socket disconnected.");
+
+    socket.on("connect", onConnect);
+    socket.on("receiveMessage", onReceiveMessage);
+    socket.on("chatCreated", onChatCreated);
+    socket.on("titleUpdated", onTitleUpdated);
+    socket.on("disconnect", onDisconnect);
 
     return () => {
+      console.log("Cleaning up socket connection.");
+      socket.off("connect", onConnect);
+      socket.off("receiveMessage", onReceiveMessage);
+      socket.off("chatCreated", onChatCreated);
+      socket.off("titleUpdated", onTitleUpdated);
+      socket.off("disconnect", onDisconnect);
       socket.disconnect();
     };
-  }, [fetchChatList]); // useEffect runs once to set up listeners
+  }, [fetchChatList, fetchUserProfile]); // Include both dependencies
 
-  // --- Message Sending ---
-  const handleSendMessage = (e: React.FormEvent<HTMLFormElement>) => {
+  // Separate effect to handle currentChatId changes for receiveMessage
+  useEffect(() => {
+    if (!socketRef.current) return;
+
+    const onReceiveMessage = (data: { content: string; chatId: string }) => {
+      if (data.chatId === currentChatId) {
+        setCurrentMessages((prev) => [...prev, { role: "model", content: data.content }]);
+      }
+      setIsLoading(false);
+      fetchChatList();
+    };
+
+    socketRef.current.off("receiveMessage");
+    socketRef.current.on("receiveMessage", onReceiveMessage);
+
+    return () => {
+      socketRef.current?.off("receiveMessage", onReceiveMessage);
+    };
+  }, [currentChatId, fetchChatList]);
+
+  const handleSendMessage = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!input.trim() || isLoading || !currentChatId) return;
+    if (!input.trim() || isLoading || isCreatingChat) return;
 
-    const userMessage: Message = { role: "user", content: input };
-    setCurrentMessages((prev) => [...prev, userMessage]);
-
-    socketRef.current?.emit("sendMessage", { message: input, chatId: currentChatId });
+    const messageToSend = input.trim();
     setInput("");
+
+    // If no chat exists, create one and save the message to send after creation
+    if (!currentChatId) {
+      pendingMessageRef.current = messageToSend;
+      handleCreateNewChat();
+      return;
+    }
+
+    // Send message to existing chat
+    const userMessage: Message = { role: "user", content: messageToSend };
+    setCurrentMessages((prev) => [...prev, userMessage]);
+    socketRef.current?.emit("sendMessage", { message: messageToSend, chatId: currentChatId });
     setIsLoading(true);
   };
 
-  // --- Other UI Handlers ---
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [currentMessages]);
@@ -155,29 +236,29 @@ export default function PersonalAIPage(): React.ReactElement {
 
   const ChatHistoryContent = (): React.ReactElement => (
     <>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between p-4 border-b">
         <h2 className="text-lg font-semibold">History</h2>
-        <Button variant="ghost" size="icon" onClick={handleCreateNewChat} disabled={isLoading}>
+        <Button variant="ghost" size="icon" onClick={handleCreateNewChat} disabled={isLoading || isCreatingChat}>
           <PlusCircle className="h-5 w-5" />
           <span className="sr-only">New Chat</span>
         </Button>
       </div>
-      <div className="flex flex-col gap-2 p-2">
+      <div className="flex-1 overflow-y-auto p-2">
         {chatHistory.length > 0 ? (
           chatHistory.map((chat) => (
             <Button
               key={chat.id}
-              variant={currentChatId === chat.id ? "default" : "ghost"}
-              className="justify-start truncate"
+              variant={currentChatId === chat.id ? "secondary" : "ghost"}
+              className="w-full justify-start truncate"
               onClick={() => loadChatMessages(chat.id)}
-              disabled={isLoading}
+              disabled={isLoading || isCreatingChat}
             >
               {chat.title}
             </Button>
           ))
         ) : (
-          <div className="text-center text-sm text-muted-foreground py-4">
-            No chats yet. Start one!
+          <div className="text-center text-sm text-muted-foreground p-4">
+            No chats yet.
           </div>
         )}
       </div>
@@ -185,130 +266,77 @@ export default function PersonalAIPage(): React.ReactElement {
   );
 
   return (
-    <div className="flex flex-col h-[calc(100vh-10rem)]">
-      {/* Header */}
-      <motion.div
-        className="text-center mb-8 relative"
-        initial="hidden" animate="visible" transition={{ duration: 0.5 }} variants={FADE_IN_VARIANTS}
-      >
+    <div className="flex flex-col h-[calc(100vh-8rem)]">
+      <motion.div className="text-center mb-4 sm:mb-6 relative" initial="hidden" animate="visible" transition={{ duration: 0.5 }} variants={FADE_IN_VARIANTS}>
         <div className="absolute top-0 left-0 md:hidden">
           <Sheet>
             <SheetTrigger asChild>
-              <Button variant="outline" size="icon">
-                <History className="h-4 w-4" /><span className="sr-only">View Chat History</span>
-              </Button>
+              <Button variant="outline" size="icon"><History className="h-4 w-4" /><span className="sr-only">View Chat History</span></Button>
             </SheetTrigger>
-            <SheetContent>
-              <SheetHeader>
-                <SheetTitle className="sr-only">Chat History</SheetTitle>
-              </SheetHeader>
-              <ChatHistoryContent />
-            </SheetContent>
+            <SheetContent side="left" className="p-0 w-full max-w-sm"><ChatHistoryContent /></SheetContent>
           </Sheet>
         </div>
-        <h1 className="text-5xl font-extrabold ...">Personal AI Assistant</h1>
-        <p className="text-gray-500 ...">Your creative partner...</p>
+        <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight bg-gradient-to-r from-pink-500 to-rose-500 bg-clip-text text-transparent">
+          Personal AI Assistant
+        </h1>
+        <p className="text-muted-foreground mt-2 text-sm sm:text-base">Your creative partner for ideas, questions, and more.</p>
       </motion.div>
-
-      {/* Layout Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-6 flex-1">
-        {/* Sidebar (Desktop) */}
-        <motion.div
-          className="hidden md:flex flex-col gap-4"
-          initial="hidden" animate="visible" transition={{ duration: 0.5, delay: 0.2 }} variants={FADE_IN_VARIANTS}
-        >
-          <Card className="h-full">
-            <CardContent className="pt-6"><ChatHistoryContent /></CardContent>
-          </Card>
+      <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-4 flex-1">
+        <motion.div className="hidden md:flex flex-col" initial="hidden" animate="visible" transition={{ duration: 0.5, delay: 0.2 }} variants={FADE_IN_VARIANTS}>
+          <Card className="h-full flex flex-col"><ChatHistoryContent /></Card>
         </motion.div>
-
-        {/* Chat Area */}
-        <motion.div
-          className="flex-1"
-          initial="hidden" animate="visible" transition={{ duration: 0.5, delay: 0.4 }} variants={FADE_IN_VARIANTS}
-        >
+        <motion.div className="flex-1" initial="hidden" animate="visible" transition={{ duration: 0.5, delay: 0.4 }} variants={FADE_IN_VARIANTS}>
           <Card className="h-full flex flex-col overflow-hidden">
             <CardContent className="flex-1 overflow-y-auto space-y-4 p-4">
               {isLoading && currentMessages.length === 0 ? (
-                <div className="flex justify-center items-center h-full">
-                  <span className="text-pink-500 animate-pulse">Loading...</span>
-                </div>
-              ) : !currentChatId && chatHistory.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground">
+                <div className="flex justify-center items-center h-full"><span className="text-pink-500 animate-pulse">Loading...</span></div>
+              ) : !currentChatId && chatHistory.length === 0 && !isCreatingChat ? (
+                <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-4">
                   <Sparkles className="h-12 w-12 text-pink-400 mb-4" />
                   <h3 className="font-semibold">Start your first conversation</h3>
                   <p className="text-sm">Ask Felicity anything about your studies or just for fun.</p>
-                  <Button className="mt-4" onClick={handleCreateNewChat} disabled={isLoading}>
-                    Start Chat
+                  <Button className="mt-4" onClick={handleCreateNewChat} disabled={isCreatingChat}>
+                    {isCreatingChat ? "Creating..." : "Start Chat"}
                   </Button>
                 </div>
-              ) : currentMessages.length === 0 && currentChatId ? (
-                <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground">
-                  <h3 className="font-semibold">Chat Ready</h3>
-                  <p className="text-sm">Type your first message to begin!</p>
+              ) : currentMessages.length === 0 && (currentChatId || isCreatingChat) ? (
+                <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-4">
+                  <h3 className="font-semibold">{isCreatingChat ? "Creating Chat..." : "Chat Ready"}</h3>
+                  <p className="text-sm">{isCreatingChat ? "Please wait..." : "Type your first message to begin!"}</p>
                 </div>
               ) : (
                 currentMessages.map((message, index) => (
                   <div key={index} className={cn("flex items-start gap-3", { "justify-end": message.role === "user" })}>
-                    {message.role === "model" && (
-                      <Avatar className="h-8 w-8">
-                        <div className="h-full w-full flex items-center justify-center bg-pink-500 rounded-full">
-                          <Sparkles className="h-5 w-5 text-white" />
-                        </div>
-                      </Avatar>
-                    )}
-                    <div className={cn("max-w-xs ... p-3 ...", { "bg-primary ...": message.role === "user", "bg-muted": message.role === "model" })}>
-                      {message.content}
-                    </div>
+                    {message.role === "model" && (<Avatar className="h-8 w-8"><div className="h-full w-full flex items-center justify-center bg-pink-500 rounded-full"><Sparkles className="h-5 w-5 text-white" /></div></Avatar>)}
+                    <div className={cn("max-w-xs md:max-w-md lg:max-w-lg p-3 rounded-xl whitespace-pre-wrap", { "bg-primary text-primary-foreground": message.role === "user", "bg-muted": message.role === "model" })}>{message.content}</div>
                     {message.role === "user" && (
                       <Avatar className="h-8 w-8">
-                        <AvatarImage src="https://github.com/shadcn.png" alt="@bhumika" />
-                        <AvatarFallback>B</AvatarFallback>
+                        <AvatarImage 
+                          src={user?.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || 'User')}&background=ec4899&color=fff`} 
+                          alt={user?.name || "User"} 
+                        />
+                        <AvatarFallback className="bg-pink-500 text-white">
+                          {user?.name ? user.name.charAt(0).toUpperCase() : 'U'}
+                        </AvatarFallback>
                       </Avatar>
                     )}
                   </div>
                 ))
               )}
-
               {isLoading && currentMessages.length > 0 && (
                 <div className="flex items-start gap-3">
-                  <Avatar className="h-8 w-8">
-                    <div className="h-full w-full flex ... bg-pink-500 ...">
-                      <Sparkles className="h-5 w-5 text-white animate-pulse" />
-                    </div>
-                  </Avatar>
-                  <div className="bg-muted p-3 rounded-xl">
-                    <span className="animate-pulse">Thinking...</span>
-                  </div>
+                  <Avatar className="h-8 w-8"><div className="h-full w-full flex items-center justify-center bg-pink-500 rounded-full"><Sparkles className="h-5 w-5 text-white animate-pulse" /></div></Avatar>
+                  <div className="bg-muted p-3 rounded-xl"><span className="animate-pulse">Thinking...</span></div>
                 </div>
               )}
               <div ref={messagesEndRef} />
             </CardContent>
-
-            {/* Input Footer */}
-            <CardFooter className="p-4 border-t">
+            <CardFooter className="p-2 border-t sm:p-4">
               <form onSubmit={handleSendMessage} className="w-full flex items-center gap-2">
                 <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
-                <Button type="button" variant="ghost" size="icon" onClick={handleFileButtonClick} disabled={!currentChatId}>
-                  <Paperclip className="h-5 w-5" /><span className="sr-only">Attach file</span>
-                </Button>
-                <Textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder={currentChatId ? "Ask Felicity..." : "Click '+' to begin."}
-                  className="flex-1 resize-none"
-                  rows={1}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendMessage(e as unknown as React.FormEvent<HTMLFormElement>);
-                    }
-                  }}
-                  disabled={isLoading || !currentChatId}
-                />
-                <Button type="submit" size="icon" disabled={isLoading || !currentChatId}>
-                  <Send className="h-4 w-4" />
-                </Button>
+                <Button type="button" variant="ghost" size="icon" onClick={handleFileButtonClick} disabled={!currentChatId || isCreatingChat}><Paperclip className="h-5 w-5" /><span className="sr-only">Attach file</span></Button>
+                <Textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder={currentChatId ? "Ask Felicity..." : isCreatingChat ? "Creating chat..." : "Click '+' or 'Start Chat' to begin."} className="flex-1 resize-none" rows={1} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage(e as any); } }} disabled={isLoading || isCreatingChat} />
+                <Button type="submit" size="icon" disabled={isLoading || !input.trim() || isCreatingChat}><Send className="h-4 w-4" /></Button>
               </form>
             </CardFooter>
           </Card>
