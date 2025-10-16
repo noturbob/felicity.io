@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar } from "@/components/ui/avatar";
 import { Send, Sparkles, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
 import io, { Socket } from "socket.io-client";
@@ -28,8 +28,11 @@ interface User {
   avatar?: string;
 }
 
-const SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL!;
-const API_URL = process.env.NEXT_PUBLIC_API_URL!;
+// Dynamic URLs: local for dev, production from environment variables
+const SERVER_URL =
+  process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:8080";
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/chats";
 
 export default function PersonalAIPage(): React.ReactElement {
   const [currentMessages, setCurrentMessages] = useState<Message[]>([]);
