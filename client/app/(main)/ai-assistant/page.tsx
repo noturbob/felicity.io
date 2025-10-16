@@ -119,7 +119,7 @@ export default function PersonalAIPage(): React.ReactElement {
     };
 
     socket.on("connect", onConnect);
-    socket.on("receiveMessage", (data: { content: string; chatId: string }) => {
+    socket.on("receiveMessage", (data: { content: string; chatId: string; }) => {
       if (data.chatId === currentChatId) {
         setCurrentMessages(prev => [...prev, { role: "model", content: data.content }]);
       }
