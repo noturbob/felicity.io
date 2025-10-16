@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSeparator } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 
-const API_URL = "http://localhost:8080/api/auth";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
 interface SignupFormProps extends React.HTMLAttributes<HTMLDivElement> {
     setAuthView: (view: AuthView) => void;

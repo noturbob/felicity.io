@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSeparator } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 
-const API_URL = "http://localhost:8080/api/auth";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 // IMPORTANT: This should be your actual admin email address stored in the database.
 const ADMIN_EMAIL = "admin@felicity.io";
 
