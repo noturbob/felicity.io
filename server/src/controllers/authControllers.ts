@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import User, { UserDocument } from '../models/User'; // Import the UserDocument type
+import User, { UserDocument } from '../models/User';
 import jwt from 'jsonwebtoken';
 
 const generateToken = (id: string) => {
@@ -10,11 +10,23 @@ const generateToken = (id: string) => {
 
 export const registerUser = async (req: Request, res: Response) => {
   const { name, email, password } = req.body;
-
+  
   try {
+    // Validate input
+    if (!name || !email || !password) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Please provide all required fields' 
+      });
+    }
+
     const userExists = await User.findOne({ email });
+    
     if (userExists) {
-      return res.status(400).json({ message: 'User already exists' });
+      return res.status(400).json({ 
+        success: false,
+        message: 'User already exists' 
+      });
     }
 
     const user = await User.create({
@@ -25,38 +37,62 @@ export const registerUser = async (req: Request, res: Response) => {
 
     if (user) {
       res.status(201).json({
+        success: true,
         _id: user._id,
         name: user.name,
         email: user.email,
-        token: generateToken((user._id as any).toString()), // FIX: Cast _id to any before calling toString()
+        token: generateToken((user._id as any).toString()),
       });
     } else {
-      res.status(400).json({ message: 'Invalid user data' });
+      res.status(400).json({ 
+        success: false,
+        message: 'Invalid user data' 
+      });
     }
-  } catch (error) {
-    res.status(500).json({ message: 'Server Error' });
+  } catch (error: any) {
+    console.error('❌ Register error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server Error',
+      error: process.env.NODE_ENV !== 'production' ? error.message : undefined
+    });
   }
 };
 
 export const loginUser = async (req: Request, res: Response) => {
   const { email, password } = req.body;
-
+  
   try {
-    // Specify that the found user will be of type UserDocument or null
+    // Validate input
+    if (!email || !password) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Please provide email and password' 
+      });
+    }
+
     const user: UserDocument | null = await User.findOne({ email });
 
-    // Now TypeScript knows that if user exists, it has the matchPassword method
     if (user && (await user.matchPassword(password))) {
       res.json({
+        success: true,
         _id: user._id,
         name: user.name,
         email: user.email,
-        token: generateToken((user._id as any).toString()), // FIX: Cast _id to any before calling toString()
+        token: generateToken((user._id as any).toString()),
       });
     } else {
-      res.status(401).json({ message: 'Invalid email or password' });
+      res.status(401).json({ 
+        success: false,
+        message: 'Invalid email or password' 
+      });
     }
-  } catch (error) {
-    res.status(500).json({ message: 'Server Error' });
+  } catch (error: any) {
+    console.error('❌ Login error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Server Error',
+      error: process.env.NODE_ENV !== 'production' ? error.message : undefined
+    });
   }
 };

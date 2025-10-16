@@ -5,7 +5,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import passport from 'passport';
 import jwt from 'jsonwebtoken';
-import { GoogleGenerativeAI, ChatSession, GenerativeModel, Content, Part } from '@google/generative-ai';
+import { GoogleGenerativeAI, ChatSession, GenerativeModel, Content } from '@google/generative-ai';
 import { configurePassport } from './config/passport';
 import connectDB from './config/db';
 import grievanceRoutes from './routes/grievanceRoutes';
@@ -30,26 +30,28 @@ const allowedOrigins = [
   process.env.CLIENT_URL,
 ].filter(Boolean);
 
-console.log('Allowed Origins:', allowedOrigins); // Debug log
+console.log('🌐 Allowed Origins:', allowedOrigins);
+console.log('🔧 Environment:', process.env.NODE_ENV || 'development');
 
 const corsOptions = {
   origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-    // Allow requests with no origin (like mobile apps, Postman, or same-origin)
+    // Allow requests with no origin (mobile apps, Postman, server-to-server)
     if (!origin) {
       return callback(null, true);
     }
     
-    // Allow all Vercel preview deployments (they have this pattern)
+    // Allow all Vercel preview and production deployments
     if (origin.includes('vercel.app')) {
       return callback(null, true);
     }
     
+    // Allow specifically configured origins
     if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.log(`CORS blocked origin: ${origin}`); // Debug log
-      callback(new Error(`Not allowed by CORS: ${origin}`));
+      return callback(null, true);
     }
+    
+    console.log(`❌ CORS blocked origin: ${origin}`);
+    callback(new Error(`Not allowed by CORS: ${origin}`));
   },
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   credentials: true,
@@ -58,12 +60,7 @@ const corsOptions = {
   maxAge: 86400 // 24 hours - cache preflight requests
 };
 
-// Apply CORS before other middleware
-app.use(cors(corsOptions));
-
-// Handle preflight requests explicitly
-app.options('*', cors(corsOptions));
-
+// Socket.IO configuration with proper TypeScript types
 const io = new SocketIOServer(server, { 
   cors: {
     origin: (origin: string | undefined, callback: (err: Error | null, success?: boolean) => void) => {
@@ -81,13 +78,30 @@ const io = new SocketIOServer(server, {
   }
 });
 
+// Apply CORS before other middleware
+app.use(cors(corsOptions));
+
+// Handle preflight requests explicitly
+app.options('*', cors(corsOptions));
+
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(passport.initialize());
 configurePassport();
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.status(200).json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`📥 ${req.method} ${req.path} - Origin: ${req.headers.origin || 'none'}`);
+  next();
 });
 
 // --- API ROUTES ---
@@ -103,11 +117,15 @@ const activeChatSessions = new Map<string, { chat: ChatSession, dbId: string }>(
 // --- WEBSOCKET AUTHENTICATION MIDDLEWARE ---
 io.use(async (socket, next) => {
     const token = socket.handshake.auth.token;
-    if (!token) { return next(new Error('Authentication error: No token provided.')); }
+    if (!token) { 
+      return next(new Error('Authentication error: No token provided.')); 
+    }
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { id: string };
         const user = await User.findById(decoded.id).select('-password');
-        if (!user) { return next(new Error('Authentication error: User not found.')); }
+        if (!user) { 
+          return next(new Error('Authentication error: User not found.')); 
+        }
         (socket as any).user = user;
         next();
     } catch (err) {
@@ -148,10 +166,10 @@ const initializeChatSession = async (socketId: string, chatId: string, model: Ge
           generationConfig: { maxOutputTokens: 2000 } 
         });
         activeChatSessions.set(socketId, { chat, dbId: chatId });
-        console.log(`Initialized session for ${socketId} with chat ${chatId}`);
+        console.log(`✅ Initialized session for ${socketId} with chat ${chatId}`);
         return true;
     } catch (error) {
-        console.error("Error initializing chat session:", error);
+        console.error("❌ Error initializing chat session:", error);
         return false;
     }
 };
@@ -159,7 +177,7 @@ const initializeChatSession = async (socketId: string, chatId: string, model: Ge
 // --- WEBSOCKET CONNECTION LOGIC ---
 io.on('connection', (socket) => {
     const user = (socket as any).user;
-    console.log(`User connected: ${user.name} (${socket.id})`);
+    console.log(`👤 User connected: ${user.name} (${socket.id})`);
 
     const model = genAI.getGenerativeModel({
       model: "gemini-2.5-flash",
@@ -182,8 +200,9 @@ io.on('connection', (socket) => {
             const chatId = newChatRecord._id.toString();
             await initializeChatSession(socket.id, chatId, model);
             socket.emit('chatCreated', chatId);
+            console.log(`✨ New chat created: ${chatId}`);
         } catch (error) {
-            console.error("Failed to create new chat:", error);
+            console.error("❌ Failed to create new chat:", error);
             socket.emit('error', { message: 'Failed to create new chat' });
         }
     });
@@ -222,7 +241,7 @@ io.on('connection', (socket) => {
             });
             socket.emit('receiveMessage', { content: aiText, chatId });
         } catch (error) {
-            console.error("Error in sendMessage:", error);
+            console.error("❌ Error in sendMessage:", error);
             socket.emit('receiveMessage', { 
               content: "Sorry, an error occurred. Please try again.", 
               chatId 
@@ -232,22 +251,38 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         activeChatSessions.delete(socket.id);
-        console.log(`User disconnected: ${user.name} (${socket.id})`);
+        console.log(`👋 User disconnected: ${user.name} (${socket.id})`);
     });
 });
 
-// Error handling middleware
+// 404 handler for undefined routes
+app.use((req, res) => {
+  res.status(404).json({ 
+    success: false,
+    message: `Route ${req.method} ${req.path} not found` 
+  });
+});
+
+// Global error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Error:', err);
-  res.status(500).json({ 
-    error: 'Internal server error', 
-    message: err.message 
+  console.error('❌ Server Error:', err);
+  
+  // Don't leak error details in production
+  const message = process.env.NODE_ENV === 'production' 
+    ? 'Internal server error' 
+    : err.message;
+  
+  res.status(err.status || 500).json({ 
+    success: false,
+    message,
+    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
   });
 });
 
 // --- SERVER STARTUP ---
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
-  console.log(`Server is listening on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🚀 Server is listening on port ${PORT}`);
+  console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🌐 CORS enabled for:`, allowedOrigins);
 });
