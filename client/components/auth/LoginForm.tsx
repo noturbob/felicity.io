@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSeparator } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import Image from "next/image"; // Import Next.js Image for optimization
 
-// Use the environment variable for the server URL, fallback for local dev
+// Use the environment variable for the server URL, with a fallback for local dev
 const API_BASE_URL = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:8080';
 
 const ADMIN_EMAIL = "admin@felicity.io";
@@ -32,10 +33,11 @@ export function LoginForm({ setAuthView, className, ...props }: LoginFormProps) 
     const loginEmail = role === 'admin' ? ADMIN_EMAIL : email;
 
     try {
-      // FIX: Added a slash between the base URL and the API path
+      // FIX 1: Added a slash between the base URL and the API path.
       const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // FIX 2: Removed the 'role' property. The server determines the role securely.
         body: JSON.stringify({ email: loginEmail, password }),
       });
 
@@ -110,7 +112,7 @@ export function LoginForm({ setAuthView, className, ...props }: LoginFormProps) 
                   <FieldSeparator>Or continue with</FieldSeparator>
                   <Field>
                     <Button variant="outline" type="button" className="w-full" asChild>
-                      {/* FIX: Added a slash for the Google auth URL */}
+                      {/* FIX 3: Added a slash for the Google auth URL */}
                       <a href={`${API_BASE_URL}/api/auth/google`}>
                           <svg className="mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z" fill="currentColor"/></svg>
                           Login with Google
@@ -126,11 +128,16 @@ export function LoginForm({ setAuthView, className, ...props }: LoginFormProps) 
           </form>
 
           <div className="bg-muted relative hidden md:block">
-            <img src="https://placehold.co/1080x1920/ec4899/fbcfe8?text=Felicity.io" alt="A beautiful pink gradient placeholder for Felicity.io" className="absolute inset-0 h-full w-full object-cover"/>
+            <Image 
+              src="https://placehold.co/1080x1920/ec4899/fbcfe8?text=Felicity.io" 
+              alt="A beautiful pink gradient placeholder for Felicity.io" 
+              fill
+              style={{objectFit: 'cover'}}
+              priority
+            />
           </div>
         </CardContent>
       </Card>
     </div>
   )
 }
-
