@@ -16,42 +16,47 @@ interface UserContextType {
     isLoading: boolean;
 }
 
-// Create the context with a default value
+// Create the context
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
-const API_URL = "http://localhost:8080/api/users/profile";
+const API_URL = `${process.env.NEXT_PUBLIC_SERVER_URL}/api/users/profile`;
 
-// Create the provider component that will wrap our application
+// Create the provider component
 export const UserProvider = ({ children }: { children: ReactNode }) => {
     const [user, setUser] = useState<UserProfile | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
         const fetchUserProfile = async () => {
+            // 1. Get the token from localStorage.
             const token = localStorage.getItem('token');
             if (!token) {
-                // If no token, redirect to login.
-                // A full redirect is better than a client-side one here.
-                window.location.href = '/authenticate';
+                // If there's no token, we can't fetch the user.
+                // The protected route in layout.tsx will handle the redirect.
+                setIsLoading(false);
                 return;
             }
 
             try {
+                // 2. Include the token in the Authorization header.
                 const res = await fetch(API_URL, {
                     headers: { 'Authorization': `Bearer ${token}` },
                 });
 
                 if (!res.ok) {
-                    // If token is invalid, clear it and redirect
+                    // If the token is invalid, the server will respond with 401.
+                    // Clear the bad token and let the protected route handle the redirect.
                     localStorage.removeItem('token');
-                    window.location.href = '/authenticate';
-                    throw new Error('Session expired. Please log in again.');
+                    throw new Error('Session expired or invalid. Please log in again.');
                 }
                 
                 const data: UserProfile = await res.json();
                 setUser(data);
             } catch (error) {
                 console.error(error);
+                // In case of error, ensure we redirect by clearing the token if it exists
+                localStorage.removeItem('token');
+                window.location.href = '/authenticate';
             } finally {
                 setIsLoading(false);
             }
@@ -62,7 +67,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
     return (
         <UserContext.Provider value={{ user, isLoading }}>
-            {children}
+            {isLoading ? <div className="flex h-screen w-full items-center justify-center">Loading User...</div> : children}
         </UserContext.Provider>
     );
 };
@@ -75,3 +80,4 @@ export const useUser = () => {
     }
     return context;
 };
+

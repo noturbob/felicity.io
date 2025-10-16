@@ -169,7 +169,7 @@ export default function HomePage() {
                             <div className="aspect-video overflow-hidden rounded-md mt-4">
                                 <iframe
                                     className="w-full h-full"
-                                    src="https://youtu.be/k37QvhAyA2Y?si=6GEyOC8uhUobtI99" //happy birthday video
+                                    src="https://youtu.be/k37QvhAyA2Y?si=_BB8xn1sY5VJJJ9_" //happy birthday video
                                     title="YouTube video player"
                                     frameBorder="0"
                                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
