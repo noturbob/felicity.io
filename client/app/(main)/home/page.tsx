@@ -3,8 +3,6 @@
 import { useUser } from "@/context/UserContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Carousel, CarouselContent, CarouselItem } from "@/components/ui/carousel";
-// FIX: This package needs to be installed. Run the following command in your /client terminal:
-// npm install embla-carousel-autoplay
 import Autoplay from "embla-carousel-autoplay";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -169,7 +167,7 @@ export default function HomePage() {
                             <div className="aspect-video overflow-hidden rounded-md mt-4">
                                 <iframe
                                     className="w-full h-full"
-                                    src="https://youtu.be/k37QvhAyA2Y?si=_BB8xn1sY5VJJJ9_" //happy birthday video
+                                    src="https://www.youtube.com/embed/k37QvhAyA2Y" // FIX: Corrected YouTube embed link
                                     title="YouTube video player"
                                     frameBorder="0"
                                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -198,4 +196,3 @@ export default function HomePage() {
         </>
     );
 }
-
