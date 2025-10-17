@@ -16,47 +16,48 @@ interface UserContextType {
     isLoading: boolean;
 }
 
-// Create the context
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
-const API_URL = `${process.env.NEXT_PUBLIC_SERVER_URL}/api/users/profile`;
+// FIX: Added a fallback to 'http://localhost:8080' for local development.
+// This ensures the URL works even without a .env.local file.
+const API_URL = `${process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:8080'}/api/users/profile`;
 
-// Create the provider component
 export const UserProvider = ({ children }: { children: ReactNode }) => {
     const [user, setUser] = useState<UserProfile | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
         const fetchUserProfile = async () => {
-            // 1. Get the token from localStorage.
             const token = localStorage.getItem('token');
             if (!token) {
-                // If there's no token, we can't fetch the user.
-                // The protected route in layout.tsx will handle the redirect.
+                // If there's no token, the user is not logged in.
                 setIsLoading(false);
+                // The protected route in ClientAuthWrapper will handle the redirect.
                 return;
             }
 
             try {
-                // 2. Include the token in the Authorization header.
+                // This fetch request now correctly sends the token to the server.
                 const res = await fetch(API_URL, {
                     headers: { 'Authorization': `Bearer ${token}` },
                 });
 
                 if (!res.ok) {
-                    // If the token is invalid, the server will respond with 401.
-                    // Clear the bad token and let the protected route handle the redirect.
-                    localStorage.removeItem('token');
+                    // If the token is invalid, the server will respond with 401 Unauthorized.
+                    localStorage.removeItem('token'); // Clear the bad token
+                    window.location.href = '/authenticate'; // Force redirect
                     throw new Error('Session expired or invalid. Please log in again.');
                 }
                 
                 const data: UserProfile = await res.json();
                 setUser(data);
             } catch (error) {
-                console.error(error);
-                // In case of error, ensure we redirect by clearing the token if it exists
-                localStorage.removeItem('token');
-                window.location.href = '/authenticate';
+                console.error("UserContext Error:", error);
+                // If any error occurs, ensure the user is logged out.
+                if (typeof window !== 'undefined') {
+                    localStorage.removeItem('token');
+                    window.location.href = '/authenticate';
+                }
             } finally {
                 setIsLoading(false);
             }
@@ -67,12 +68,13 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
     return (
         <UserContext.Provider value={{ user, isLoading }}>
+            {/* Show a loading state until the user is fetched or confirmed not logged in */}
             {isLoading ? <div className="flex h-screen w-full items-center justify-center">Loading User...</div> : children}
         </UserContext.Provider>
     );
 };
 
-// Create a custom hook for easy access to the context
+// Custom hook for easy access to the user context
 export const useUser = () => {
     const context = useContext(UserContext);
     if (context === undefined) {

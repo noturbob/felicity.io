@@ -7,11 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSeparator } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import Image from "next/image"; // Import Next.js Image for optimization
+import Image from "next/image"; // Import the Next.js Image component
 
-// Use the environment variable for the server URL, with a fallback for local dev
 const API_BASE_URL = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:8080';
-
 const ADMIN_EMAIL = "admin@felicity.io";
 
 interface LoginFormProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -29,32 +27,18 @@ export function LoginForm({ setAuthView, className, ...props }: LoginFormProps) 
     e.preventDefault();
     setIsLoading(true);
     setError("");
-
     const loginEmail = role === 'admin' ? ADMIN_EMAIL : email;
 
     try {
-      // FIX 1: Added a slash between the base URL and the API path.
       const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // FIX 2: Removed the 'role' property. The server determines the role securely.
-        body: JSON.stringify({ email: loginEmail, password }),
+        body: JSON.stringify({ email: loginEmail, password, role }),
       });
-
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.message || "Something went wrong");
-      }
-      
+      if (!res.ok) throw new Error(data.message || "Something went wrong");
       localStorage.setItem("token", data.token);
-
-      if (data.role === 'admin') {
-        window.location.href = "/admin/dashboard";
-      } else {
-        window.location.href = "/home";
-      }
-
+      window.location.href = data.role === 'admin' ? "/admin/dashboard" : "/home";
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -74,48 +58,33 @@ export function LoginForm({ setAuthView, className, ...props }: LoginFormProps) 
                   Login as a {role === "user" ? "User" : "Admin"} to continue
                 </p>
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <Button variant={role === "user" ? "default" : "outline"} onClick={() => setRole("user")} type="button">User</Button>
                 <Button variant={role === "admin" ? "default" : "outline"} onClick={() => setRole("admin")} type="button">Admin</Button>
               </div>
-
               {role === 'user' && (
                 <Field>
                   <FieldLabel htmlFor="email">Email</FieldLabel>
                   <Input id="email" type="email" placeholder="bhumika@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
                 </Field>
               )}
-
               <Field>
                 <div className="flex items-center">
                   <FieldLabel htmlFor="password">Password</FieldLabel>
-                  {role === 'user' && (
-                    <a onClick={() => setAuthView('forgot-password')} className="ml-auto text-sm underline-offset-2 hover:underline cursor-pointer">
-                      Forgot your password?
-                    </a>
-                  )}
+                  {role === 'user' && ( <a onClick={() => setAuthView('forgot-password')} className="ml-auto text-sm underline-offset-2 hover:underline cursor-pointer"> Forgot your password? </a> )}
                 </div>
                 <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
               </Field>
-              
               {error && <p className="text-sm text-red-500 text-center">{error}</p>}
-
-              <Field>
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Logging in..." : "Login"}
-                </Button>
-              </Field>
-
+              <Field><Button type="submit" className="w-full" disabled={isLoading}>{isLoading ? "Logging in..." : "Login"}</Button></Field>
               {role === 'user' && (
                 <>
                   <FieldSeparator>Or continue with</FieldSeparator>
                   <Field>
                     <Button variant="outline" type="button" className="w-full" asChild>
-                      {/* FIX 3: Added a slash for the Google auth URL */}
                       <a href={`${API_BASE_URL}/api/auth/google`}>
-                          <svg className="mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z" fill="currentColor"/></svg>
-                          Login with Google
+                        <svg className="mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z" fill="currentColor"/></svg>
+                        Login with Google
                       </a>
                     </Button>
                   </Field>
@@ -126,15 +95,25 @@ export function LoginForm({ setAuthView, className, ...props }: LoginFormProps) 
               )}
             </FieldGroup>
           </form>
-
-          <div className="bg-muted relative hidden md:block">
-            <Image 
-              src="https://placehold.co/1080x1920/ec4899/fbcfe8?text=Felicity.io" 
-              alt="A beautiful pink gradient placeholder for Felicity.io" 
-              fill
-              style={{objectFit: 'cover'}}
-              priority
-            />
+          {/* FIX: Replaced the external image with your local logo */}
+          <div className="bg-pink-50 dark:bg-pink-950/20 relative hidden flex-col items-center justify-center p-10 md:flex">
+            <div className="absolute inset-0 bg-pink-500/10" />
+            <div className="relative z-20 flex items-center">
+              <Image
+                src="/logo.png" // This points to client/public/felicitylogo.png
+                alt="Felicity.io Logo"
+                width={120}
+                height={120}
+                className="drop-shadow-lg"
+              />
+            </div>
+            <div className="relative z-20 mt-auto">
+              <blockquote className="space-y-2 text-center">
+                <p className="text-lg text-pink-900 dark:text-pink-200">
+                  &ldquo;A special place, built just for you.&rdquo;
+                </p>
+              </blockquote>
+            </div>
           </div>
         </CardContent>
       </Card>

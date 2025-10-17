@@ -21,7 +21,8 @@ import {
 import { motion } from "framer-motion";
 import { Pen, Camera, Trash2, Check, X } from "lucide-react";
 
-const API_URL = "http://localhost:8080/api/users/profile";
+// FIX: Use the environment variable for the base API URL, with a fallback for local development.
+const API_BASE_URL = `${process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:8080'}/api/users/profile`;
 
 interface UserProfile {
     _id: string;
@@ -49,7 +50,7 @@ export default function ProfilePage() {
         }
         setIsLoading(true);
         try {
-            const res = await fetch(API_URL, {
+            const res = await fetch(API_BASE_URL, { // Use the dynamic URL
                 headers: { 'Authorization': `Bearer ${token}` }
             });
 
@@ -62,8 +63,8 @@ export default function ProfilePage() {
             setUser(data);
             setName(data.name);
             setEmail(data.email);
-        } catch (err: any) {
-            setError(err.message);
+        } catch (err) {
+            if (err instanceof Error) setError(err.message);
         } finally {
             setIsLoading(false);
         }
@@ -83,13 +84,13 @@ export default function ProfilePage() {
         setIsLoading(true);
         const token = localStorage.getItem('token');
         
-        const updateData: any = { name, email };
+        const updateData: { name: string; email: string; password?: string } = { name, email };
         if(password) {
             updateData.password = password;
         }
 
         try {
-            const res = await fetch(API_URL, {
+            const res = await fetch(API_BASE_URL, { // Use the dynamic URL
                 method: 'PUT',
                 headers: { 
                     'Content-Type': 'application/json',
@@ -108,8 +109,8 @@ export default function ProfilePage() {
             setPassword("");
             setConfirmPassword("");
 
-        } catch(err: any){
-            setError(err.message);
+        } catch(err) {
+            if (err instanceof Error) setError(err.message);
         } finally {
             setIsLoading(false);
         }
@@ -126,30 +127,21 @@ export default function ProfilePage() {
         setIsLoading(true);
         setError("");
         try {
-            const res = await fetch(`${API_URL}/avatar`, {
+            const res = await fetch(`${API_BASE_URL}/avatar`, { // Use the dynamic URL
                 method: 'PUT',
                 headers: { 'Authorization': `Bearer ${token}` },
                 body: formData,
             });
 
-            // --- FIX: Improved Error Handling ---
             if (!res.ok) {
-                const contentType = res.headers.get("content-type");
-                if (contentType && contentType.indexOf("application/json") !== -1) {
-                    const errorData = await res.json();
-                    throw new Error(errorData.message || 'Server returned an error.');
-                } else {
-                    // This is the case you are experiencing
-                    throw new Error(`Server responded with an unexpected error (${res.status}). Check backend logs.`);
-                }
+                const errorData = await res.json();
+                throw new Error(errorData.message || 'Server returned an error.');
             }
             
-            // If response is ok, then we can safely parse JSON
-            const data = await res.json();
-            await fetchUserProfile(); // Refresh profile to show new avatar
+            await fetchUserProfile(); // Refresh profile
 
-        } catch (err: any) {
-            setError(err.message);
+        } catch (err) {
+            if (err instanceof Error) setError(err.message);
         } finally {
             setIsLoading(false);
         }
@@ -160,7 +152,7 @@ export default function ProfilePage() {
         setError("");
         const token = localStorage.getItem('token');
         try {
-             const res = await fetch(API_URL, {
+             const res = await fetch(API_BASE_URL, { // Use the dynamic URL
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` },
             });
@@ -170,8 +162,8 @@ export default function ProfilePage() {
             }
             localStorage.removeItem('token');
             window.location.href = '/authenticate';
-        } catch(err: any){
-            setError(err.message);
+        } catch(err) {
+            if (err instanceof Error) setError(err.message);
         } finally {
             setIsLoading(false);
         }
@@ -205,7 +197,6 @@ export default function ProfilePage() {
             </motion.div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-                {/* PROFILE CARD (LEFT) */}
                 <motion.div
                     className="lg:col-span-1"
                     initial="hidden" animate="visible" transition={{ duration: 0.5, delay: 0.2 }} variants={FADE_IN_VARIANTS}
@@ -241,7 +232,6 @@ export default function ProfilePage() {
                     </Card>
                 </motion.div>
 
-                {/* ACCOUNT DASHBOARD (RIGHT) */}
                 <motion.div
                     className="lg:col-span-2"
                     initial="hidden" animate="visible" transition={{ duration: 0.5, delay: 0.4 }} variants={FADE_IN_VARIANTS}
@@ -256,20 +246,12 @@ export default function ProfilePage() {
                         <CardContent className="flex flex-col gap-6">
                             <div className="grid gap-2">
                                 <Label htmlFor="fullname">Full Name</Label>
-                                {isEditing ? (
-                                    <Input id="fullname" value={name} onChange={(e) => setName(e.target.value)} />
-                                ) : (
-                                    <p className="text-muted-foreground">{user.name}</p>
-                                )}
+                                {isEditing ? ( <Input id="fullname" value={name} onChange={(e) => setName(e.target.value)} /> ) : ( <p className="text-muted-foreground">{user.name}</p> )}
                             </div>
                             <Separator />
                             <div className="grid gap-2">
                                 <Label htmlFor="email">Email Address</Label>
-                                {isEditing ? (
-                                    <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-                                ) : (
-                                    <p className="text-muted-foreground">{user.email}</p>
-                                )}
+                                {isEditing ? ( <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} /> ) : ( <p className="text-muted-foreground">{user.email}</p> )}
                             </div>
                             <Separator />
                              <div className="grid gap-2">
@@ -279,26 +261,17 @@ export default function ProfilePage() {
                                         <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter new password (optional)" />
                                         <Input id="confirm-password" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Confirm new password" />
                                     </div>
-                                ) : (
-                                    <p className="text-muted-foreground">••••••••••••</p>
-                                )}
+                                ) : ( <p className="text-muted-foreground">••••••••••••</p> )}
                             </div>
                              {error && <p className="text-sm text-red-500 text-center pt-2">{error}</p>}
                         </CardContent>
                         {isEditing && (
                             <CardFooter className="justify-end gap-2">
-                                <Button variant="ghost" onClick={() => setIsEditing(false)} disabled={isLoading}>
-                                    <X className="mr-2 h-4 w-4" /> Cancel
-                                </Button>
-                                <Button onClick={handleSaveChanges} disabled={isLoading}>
-                                    <Check className="mr-2 h-4 w-4" /> 
-                                    {isLoading ? "Saving..." : "Save Changes"}
-                                </Button>
+                                <Button variant="ghost" onClick={() => setIsEditing(false)} disabled={isLoading}><X className="mr-2 h-4 w-4" /> Cancel</Button>
+                                <Button onClick={handleSaveChanges} disabled={isLoading}><Check className="mr-2 h-4 w-4" /> {isLoading ? "Saving..." : "Save Changes"}</Button>
                             </CardFooter>
                         )}
                     </Card>
-
-                    {/* DELETE ACCOUNT SECTION */}
                     <Card className="mt-8 border-destructive">
                          <CardHeader>
                             <CardTitle>Danger Zone</CardTitle>
@@ -306,25 +279,10 @@ export default function ProfilePage() {
                         </CardHeader>
                         <CardContent>
                             <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                    <Button variant="destructive" disabled={isLoading}>
-                                        <Trash2 className="mr-2 h-4 w-4" />
-                                        Delete Account
-                                    </Button>
-                                </AlertDialogTrigger>
+                                <AlertDialogTrigger asChild><Button variant="destructive" disabled={isLoading}><Trash2 className="mr-2 h-4 w-4" />Delete Account</Button></AlertDialogTrigger>
                                 <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                        This will permanently delete your account and all associated data. This action cannot be undone.
-                                    </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction onClick={handleDeleteAccount} className="bg-destructive hover:bg-destructive/90">
-                                        Yes, delete my account
-                                    </AlertDialogAction>
-                                    </AlertDialogFooter>
+                                    <AlertDialogHeader><AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle><AlertDialogDescription>This will permanently delete your account and all associated data. This action cannot be undone.</AlertDialogDescription></AlertDialogHeader>
+                                    <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleDeleteAccount} className="bg-destructive hover:bg-destructive/90">Yes, delete my account</AlertDialogAction></AlertDialogFooter>
                                 </AlertDialogContent>
                             </AlertDialog>
                         </CardContent>
@@ -334,4 +292,3 @@ export default function ProfilePage() {
         </div>
     );
 }
-
