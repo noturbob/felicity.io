@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -8,21 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Inbox, PlusCircle, Smile, Frown, PartyPopper, BrainCircuit } from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 
 // Type definition for a grievance
 interface Grievance {
@@ -42,26 +29,34 @@ const moodOptions = [
     { value: "excited", icon: <PartyPopper className="h-5 w-5 text-yellow-500" />, label: "Excited" },
 ];
 
-const API_URL = "http://localhost:8080/api/grievances";
+// FIX 1: Use the environment variable for a dynamic API URL
+const API_URL = `${process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:8080'}/api/grievances`;
 
 export default function SupportPage() {
     const [isCreating, setIsCreating] = useState(false);
     const [pastGrievances, setPastGrievances] = useState<Grievance[]>([]);
-    
-    // Form state
     const [subject, setSubject] = useState("");
     const [message, setMessage] = useState("");
     const [selectedMood, setSelectedMood] = useState<string | undefined>(undefined);
-    
-    // UI state
     const [isLoading, setIsLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [error, setError] = useState(""); // State for displaying errors
+    const [error, setError] = useState("");
 
-    const fetchGrievances = async () => {
+    const fetchGrievances = useCallback(async () => {
       setIsLoading(true);
+      // FIX 2: Get the auth token from localStorage
+      const token = localStorage.getItem('token');
+      if (!token) {
+        // This will be caught by the main layout, but it's good practice
+        setIsLoading(false);
+        return;
+      }
       try {
-        const res = await fetch(API_URL);
+        // FIX 3: Send the token in the Authorization header
+        const res = await fetch(API_URL, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error("Failed to load grievances.");
         const data = await res.json();
         setPastGrievances(data);
       } catch (error) {
@@ -69,39 +64,46 @@ export default function SupportPage() {
       } finally {
         setIsLoading(false);
       }
-    };
+    }, []);
 
     useEffect(() => {
         fetchGrievances();
-    }, []);
+    }, [fetchGrievances]);
 
     const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       setIsSubmitting(true);
-      setError(""); // Reset error on new submission
+      setError("");
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError("You are not logged in.");
+        setIsSubmitting(false);
+        return;
+      }
 
       try {
         const res = await fetch(API_URL, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          // FIX 4: Send the token in the Authorization header for the POST request
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
           body: JSON.stringify({ subject, message, mood: selectedMood }),
         });
         
         const data = await res.json();
         if (!res.ok) {
-          // If server returns an error, display it
-          throw new Error(data.message || 'An error occurred.');
+          throw new Error(data.message || 'An error occurred while submitting.');
         }
 
-        // Reset form and state on success
         setSubject("");
         setMessage("");
         setSelectedMood(undefined);
         setIsCreating(false);
         fetchGrievances(); // Refetch grievances to show the new one
-
       } catch (err: any) {
-        setError(err.message); // Set the error message to be displayed
+        setError(err.message);
       } finally {
         setIsSubmitting(false);
       }
@@ -137,7 +139,7 @@ export default function SupportPage() {
                   <CardHeader>
                     <CardTitle>Submit a New Grievance</CardTitle>
                     <CardDescription>
-                      Please describe your issue in detail. I'll get back to you as soon as possible.
+                      Please describe your issue in detail. I&apos;ll get back to you as soon as possible.
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="flex flex-col gap-4">
@@ -228,4 +230,3 @@ export default function SupportPage() {
     </div>
   );
 }
-

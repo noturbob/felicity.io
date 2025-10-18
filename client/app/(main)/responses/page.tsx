@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -24,7 +24,7 @@ interface Grievance {
   createdAt: string;
 }
 
-// FIX 1: Changed type from { [key: string]: JSX.Element } to the correct Record<string, React.ReactNode>
+// Mood icons mapping
 const moodIcons: Record<string, React.ReactNode> = {
     happy: <Smile className="h-5 w-5 text-green-500" />,
     thinking: <BrainCircuit className="h-5 w-5 text-blue-500" />,
@@ -32,31 +32,51 @@ const moodIcons: Record<string, React.ReactNode> = {
     excited: <PartyPopper className="h-5 w-5 text-yellow-500" />,
 };
 
-// FIX 2: Use the environment variable to ensure proper routing on Vercel/Render
-const API_URL = `${process.env.NEXT_PUBLIC_SERVER_URL}/api/grievances`;
+// FIX 1: Use the environment variable for a dynamic and deployment-ready API URL
+const API_URL = `${process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:8080'}/api/grievances`;
 
 
 export default function ResponsesPage() {
     const [grievances, setGrievances] = useState<Grievance[]>([]);
     const [isLoading, setIsLoading] = useState(true);
 
-    useEffect(() => {
-        const fetchGrievances = async () => {
-          const token = localStorage.getItem('token');
-          if (!token) return;
-          try {
-            // FIX 3: Use the dynamic API URL constant
-            const res = await fetch(API_URL, { headers: { 'Authorization': `Bearer ${token}` } });
+    // FIX 2: Use useCallback to stabilize the fetch function reference
+    const fetchGrievances = useCallback(async () => {
+        // FIX 3: Get the authentication token from localStorage
+        const token = localStorage.getItem('token');
+        if (!token) {
+            // If no token, no need to fetch. The main layout will handle redirection.
+            setIsLoading(false);
+            return;
+        }
+        try {
+            // FIX 4: Send the token in the Authorization header to the protected route
+            const res = await fetch(API_URL, { 
+                headers: { 'Authorization': `Bearer ${token}` } 
+            });
+
+            if (!res.ok) {
+                // If the token is invalid, the server will respond with 401/403.
+                // Log the user out as a security measure.
+                if (res.status === 401 || res.status === 403) {
+                    localStorage.removeItem('token');
+                    window.location.href = '/authenticate';
+                }
+                throw new Error("Failed to load grievance history.");
+            }
+
             const data = await res.json();
             setGrievances(data);
-          } catch (error) {
+        } catch (error) {
             console.error("Failed to fetch grievances", error);
-          } finally {
+        } finally {
             setIsLoading(false);
-          }
-        };
-        fetchGrievances();
+        }
     }, []);
+
+    useEffect(() => {
+        fetchGrievances();
+    }, [fetchGrievances]);
 
     const FADE_IN_VARIANTS = {
         hidden: { opacity: 0, y: 10 },
